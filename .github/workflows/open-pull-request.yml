@@ -1,0 +1,81 @@
+name: Open Pull Request
+
+on:
+  workflow_call:
+    inputs:
+      base:
+        description: Target branch for the pull request.
+        required: false
+        type: string
+        default: main
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  open:
+    name: Open or reuse pull request
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Open or reuse pull request
+        uses: actions/github-script@v7
+        env:
+          BASE_BRANCH: ${{ inputs.base }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            if (!context.ref.startsWith('refs/heads/')) {
+              core.setFailed(`Expected a branch push, received ${context.ref}.`);
+              return;
+            }
+
+            const branch = context.ref.replace('refs/heads/', '');
+            const base = process.env.BASE_BRANCH || context.payload.repository.default_branch;
+
+            if (!branch.startsWith('feature/') || branch.length <= 'feature/'.length) {
+              core.setFailed(`Expected a feature/* branch, received ${branch}.`);
+              return;
+            }
+
+            const { owner, repo } = context.repo;
+            const head = `${owner}:${branch}`;
+            const subject = context.payload.head_commit?.message?.split(/\r?\n/, 1)[0]?.trim();
+            const title = subject || `chore: merge ${branch}`;
+            const body = [
+              '<!-- papaya-actions:auto-pr -->',
+              'This pull request was opened automatically for a feature branch push.',
+              '',
+              `- Source: \`${branch}\``,
+              `- Target: \`${base}\``,
+              `- Trigger commit: ${context.serverUrl}/${owner}/${repo}/commit/${context.sha}`,
+            ].join('\n');
+
+            const openPullRequests = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: 'open',
+              head,
+              base,
+              per_page: 100,
+            });
+
+            if (openPullRequests.length > 0) {
+              const pullRequest = openPullRequests[0];
+              core.notice(`Pull request #${pullRequest.number} already exists: ${pullRequest.html_url}`);
+              return;
+            }
+
+            const pullRequest = await github.rest.pulls.create({
+              owner,
+              repo,
+              head: branch,
+              base,
+              title,
+              body,
+              maintainer_can_modify: true,
+            });
+
+            core.notice(`Created pull request #${pullRequest.data.number}: ${pullRequest.data.html_url}`);
