@@ -7,7 +7,7 @@ on:
         description: Target branch for the pull request.
         required: false
         type: string
-        default: main
+        default: develop
 
 permissions:
   contents: read
